@@ -1,0 +1,61 @@
+import cv2
+import mediapipe as mp
+from simple_pid import PID
+
+
+x_pid = PID(0.1,0.01,0.5,setpoint=320)
+h_pid = PID(0.001,0,0,setpoint=30000) #判断小车是否距离太前 需找到合适的setpoint
+lmlist = [0]*33  # 存放人体关键点信息
+mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
+mp_holistic = mp.solutions.holistic
+
+cap = cv2.VideoCapture(0)
+with mp_holistic.Holistic(
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5) as holistic:
+    while True:
+        success, image = cap.read()
+        image = cv2.resize(image, (640, 480))
+        image.flags.writeable = False
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = holistic.process(image)
+        if results.pose_landmarks :
+
+            #计算坐标
+            for index, lm in enumerate(results.pose_landmarks.landmark):
+                # 保存每帧图像的宽、高、通道数
+                h, w, c = image.shape
+
+                # 得到的关键点坐标x/y/z/visibility都是比例坐标，在[0,1]之间
+                # 转换为像素坐标(cx,cy)，图像的实际长宽乘以比例，像素坐标一定是整数
+                cx, cy = int(lm.x * w), int(lm.y * h)
+                # 打印坐标信息
+                # print(index, cx, cy)
+                lmlist[index] = (cx, cy)
+            #print("鼻子坐标=",lmlist[0][1]) #lmlist[0][0] 长 lmlist[0][1]宽
+
+            # 画图
+            image.flags.writeable = True
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            mp_drawing.draw_landmarks(
+                image,
+                results.pose_landmarks,
+                mp_holistic.POSE_CONNECTIONS,
+                landmark_drawing_spec=mp_drawing_styles
+                .get_default_pose_landmarks_style())
+            mp_drawing.draw_landmarks(image, results.left_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+            mp_drawing.draw_landmarks(image, results.right_hand_landmarks, mp_holistic.HAND_CONNECTIONS)
+
+            x_now = lmlist[0][0]
+            h_now = (lmlist[12][0] - lmlist[11][0]) * (lmlist[12][1] - lmlist[24][1]) #右下角为（0，0）
+            x_output = x_pid(x_now)
+            h_output = h_pid(h_now)
+            print("x_output = ", x_output, "h_output = ", h_output)
+ 
+            # 鼻子坐标
+            # print(results.pose_landmarks.landmark[mp_holistic.PoseLandmark.NOSE])
+            cv2.imshow('MediaPipe Holistic', cv2.flip(image, 1))
+            if cv2.waitKey(5) & 0xFF == 27:
+                break
+cap.release()
